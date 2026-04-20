@@ -40,7 +40,7 @@ export async function generateMusic(params: {
   };
 
   const prediction = await replicate.predictions.create({
-    model: "meta/musicgen",
+    version: MUSICGEN_MODEL.split(":")[1],
     input,
   });
 

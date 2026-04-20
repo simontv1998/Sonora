@@ -148,7 +148,7 @@ function TrackCard({ track, onSelect, isSelected }: {
   onSelect: (t: Track) => void;
   isSelected: boolean;
 }) {
-  const { toggle, currentTrack, isPlaying } = usePlayerStore();
+  const { toggle, currentTrack, isPlaying, progress } = usePlayerStore();
   const playing = currentTrack?.id === track.id && isPlaying;
   const waveform = track.waveform_data || Array.from({ length: 60 }, () => Math.random() * 0.6 + 0.2);
 
@@ -175,7 +175,7 @@ function TrackCard({ track, onSelect, isSelected }: {
           {track.status === "generating" ? "⟳" : playing ? "❚❚" : "▶"}
         </button>
       </div>
-      <Waveform data={waveform} progress={playing ? usePlayerStore.getState().progress : 0} height={28} />
+      <Waveform data={waveform} progress={playing ? progress : 0} height={28} />
       <div className="mt-2 text-xs truncate" style={{ color: "rgba(255,255,255,0.2)" }}>
         &ldquo;{track.prompt}&rdquo;
       </div>
