@@ -86,53 +86,58 @@ export async function POST(req: NextRequest) {
 
     if (!track) throw new Error("Failed to create remix record");
 
-    // Generate audio + metadata in parallel
-    const [audio, metadata] = await Promise.all([
-      generateRemix({
-        originalPrompt: parent.prompt,
-        variationPrompt,
-        genre: parent.genre || undefined,
-        mood: parent.mood || undefined,
-        duration,
-      }),
-      generateMetadata({
-        prompt: `Remix of "${parent.title}": ${variationPrompt}`,
-        genre: parent.genre || undefined,
-        mood: parent.mood || undefined,
-      }),
-    ]);
+    try {
+      // Generate audio + metadata in parallel
+      const [audio, metadata] = await Promise.all([
+        generateRemix({
+          originalPrompt: parent.prompt,
+          variationPrompt,
+          genre: parent.genre || undefined,
+          mood: parent.mood || undefined,
+          duration,
+        }),
+        generateMetadata({
+          prompt: `Remix of "${parent.title}": ${variationPrompt}`,
+          genre: parent.genre || undefined,
+          mood: parent.mood || undefined,
+        }),
+      ]);
 
-    // Upload audio
-    const audioResponse = await fetch(audio.audioUrl);
-    const audioBuffer = await audioResponse.arrayBuffer();
-    const audioPath = `${user.id}/${track.id}.mp3`;
+      // Upload audio
+      const audioResponse = await fetch(audio.audioUrl);
+      const audioBuffer = await audioResponse.arrayBuffer();
+      const audioPath = `${user.id}/${track.id}.mp3`;
 
-    await supabase.storage
-      .from("tracks")
-      .upload(audioPath, audioBuffer, { contentType: "audio/mpeg", upsert: true });
+      await supabase.storage
+        .from("tracks")
+        .upload(audioPath, audioBuffer, { contentType: "audio/mpeg", upsert: true });
 
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from("tracks").getPublicUrl(audioPath);
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("tracks").getPublicUrl(audioPath);
 
-    // Update remix track
-    const { data: updatedTrack } = await supabase
-      .from("tracks")
-      .update({
-        title: metadata.title,
-        lyrics: metadata.lyrics,
-        description: metadata.description,
-        tags: metadata.tags,
-        audio_url: publicUrl,
-        duration_seconds: duration,
-        replicate_prediction_id: audio.predictionId,
-        status: "completed",
-      })
-      .eq("id", track.id)
-      .select()
-      .single();
+      // Update remix track
+      const { data: updatedTrack } = await supabase
+        .from("tracks")
+        .update({
+          title: metadata.title,
+          lyrics: metadata.lyrics,
+          description: metadata.description,
+          tags: metadata.tags,
+          audio_url: publicUrl,
+          duration_seconds: duration,
+          replicate_prediction_id: audio.predictionId,
+          status: "completed",
+        })
+        .eq("id", track.id)
+        .select()
+        .single();
 
-    return NextResponse.json({ track: updatedTrack });
+      return NextResponse.json({ track: updatedTrack });
+    } catch (genError: any) {
+      await supabase.from("tracks").update({ status: "failed" }).eq("id", track.id);
+      throw genError;
+    }
   } catch (error: any) {
     console.error("Remix error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });

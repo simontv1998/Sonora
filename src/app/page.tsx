@@ -12,6 +12,16 @@ const MOODS = ["Energetic", "Chill", "Melancholic", "Uplifting", "Dark", "Dreamy
 // ─── Helpers ───
 const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s) % 60).padStart(2, "0")}`;
 
+// Deterministic per-track waveform so bars don't flicker on re-render
+function seededWaveform(id: string, bars = 60): number[] {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (Math.imul(31, h) + id.charCodeAt(i)) | 0;
+  return Array.from({ length: bars }, () => {
+    h = (Math.imul(h ^ (h >>> 16), 0x45d9f3b)) | 0;
+    return ((h >>> 0) / 0xffffffff) * 0.6 + 0.2;
+  });
+}
+
 // ─── Waveform Component ───
 function Waveform({ data, progress = 0, height = 48, onClick }: {
   data: number[];
@@ -109,7 +119,7 @@ function AudioPlayerBar() {
 
   if (!currentTrack) return null;
 
-  const fakeWaveform = currentTrack.waveform_data || Array.from({ length: 60 }, () => Math.random() * 0.6 + 0.2);
+  const fakeWaveform = currentTrack.waveform_data || seededWaveform(currentTrack.id);
 
   return (
     <div className="fixed bottom-0 left-0 right-0 backdrop-blur-xl border-t z-50"
@@ -150,7 +160,7 @@ function TrackCard({ track, onSelect, isSelected }: {
 }) {
   const { toggle, currentTrack, isPlaying, progress } = usePlayerStore();
   const playing = currentTrack?.id === track.id && isPlaying;
-  const waveform = track.waveform_data || Array.from({ length: 60 }, () => Math.random() * 0.6 + 0.2);
+  const waveform = track.waveform_data || seededWaveform(track.id);
 
   return (
     <div
@@ -158,7 +168,7 @@ function TrackCard({ track, onSelect, isSelected }: {
       className="rounded-2xl p-4 cursor-pointer transition-all animate-fade-in"
       style={{
         background: isSelected ? "rgba(168,85,247,0.06)" : "rgba(255,255,255,0.02)",
-        border: `1px solid ${isSelected ? "rgba(168,85,247,0.25)" : "rgba(255,255,255,0.05)"}`,
+        border: `1px solid ${isSelected ? "rgba(168,85,247,0.25)" : track.status === "failed" ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.05)"}`,
       }}
     >
       <div className="flex justify-between items-start mb-3">
@@ -172,7 +182,7 @@ function TrackCard({ track, onSelect, isSelected }: {
         <button onClick={(e) => { e.stopPropagation(); toggle(track); }}
           className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 transition-colors text-sm"
           style={{ background: playing ? "#a855f7" : "rgba(255,255,255,0.06)" }}>
-          {track.status === "generating" ? "⟳" : playing ? "❚❚" : "▶"}
+          {track.status === "failed" ? "✕" : track.status === "generating" ? "⟳" : playing ? "❚❚" : "▶"}
         </button>
       </div>
       <Waveform data={waveform} progress={playing ? progress : 0} height={28} />
@@ -186,7 +196,7 @@ function TrackCard({ track, onSelect, isSelected }: {
 // ─── Main App ───
 export default function Home() {
   const supabase = createClient();
-  const { tracks, setTracks, addTrack, updateTrack } = useAppStore();
+  const { tracks, setTracks, addTrack, updateTrack, removeTrack } = useAppStore();
   const { toggle, currentTrack, isPlaying } = usePlayerStore();
 
   const [user, setUser] = useState<any>(null);
@@ -203,6 +213,7 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
   const [remixSuggestions, setRemixSuggestions] = useState<string[]>([]);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [genError, setGenError] = useState<string | null>(null);
 
   // Auth check
   useEffect(() => {
@@ -237,6 +248,7 @@ export default function Home() {
     if (!prompt.trim() || generating) return;
     setGenerating(true);
     setGenProgress(0);
+    setGenError(null);
 
     const interval = setInterval(() => {
       setGenProgress((p) => Math.min(p + Math.random() * 6, 92));
@@ -263,8 +275,9 @@ export default function Home() {
         setPrompt("");
         setView("library");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setGenError(err?.message || "Generation failed. Please try again.");
     } finally {
       clearInterval(interval);
       setGenerating(false);
@@ -288,6 +301,16 @@ export default function Home() {
       setShareUrl(data.shareUrl);
       navigator.clipboard?.writeText(data.shareUrl);
     }
+  };
+
+  // Delete track
+  const handleDelete = async (track: Track) => {
+    await supabase.from("tracks").delete().eq("id", track.id);
+    if (track.audio_url) {
+      await supabase.storage.from("tracks").remove([`${user.id}/${track.id}.mp3`]);
+    }
+    removeTrack(track.id);
+    if (selectedTrack?.id === track.id) setSelectedTrack(null);
   };
 
   // Remix suggestions
@@ -349,17 +372,24 @@ export default function Home() {
             style={{ background: "linear-gradient(135deg, #a855f7, #06b6d4)" }}>♪</div>
           <span className="font-mono font-bold text-lg tracking-tight">SONORA</span>
         </div>
-        <div className="flex gap-1 p-0.5 rounded-xl" style={{ background: "rgba(255,255,255,0.04)" }}>
-          {(["create", "library"] as const).map((v) => (
-            <button key={v} onClick={() => setView(v)}
-              className="px-4 py-1.5 rounded-lg text-sm font-medium transition-all capitalize"
-              style={{
-                background: view === v ? "rgba(168,85,247,0.15)" : "transparent",
-                color: view === v ? "#c084fc" : "rgba(255,255,255,0.35)",
-              }}>
-              {v}
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          <div className="flex gap-1 p-0.5 rounded-xl" style={{ background: "rgba(255,255,255,0.04)" }}>
+            {(["create", "library"] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)}
+                className="px-4 py-1.5 rounded-lg text-sm font-medium transition-all capitalize"
+                style={{
+                  background: view === v ? "rgba(168,85,247,0.15)" : "transparent",
+                  color: view === v ? "#c084fc" : "rgba(255,255,255,0.35)",
+                }}>
+                {v}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => supabase.auth.signOut()}
+            className="px-3 py-1.5 rounded-lg text-xs transition-all"
+            style={{ color: "rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.04)" }}>
+            Sign out
+          </button>
         </div>
       </header>
 
@@ -405,6 +435,13 @@ export default function Home() {
                 style={{ color: "rgba(255,255,255,0.25)" }}>Mood</label>
               <PillSelect items={MOODS} selected={mood} onSelect={setMood} accent="#06b6d4" />
             </div>
+
+            {genError && (
+              <div className="rounded-xl px-4 py-3 text-sm mb-4 animate-fade-in"
+                style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.18)", color: "#f87171" }}>
+                {genError}
+              </div>
+            )}
 
             {generating && (
               <div className="rounded-2xl p-6 animate-fade-in"
@@ -471,6 +508,11 @@ export default function Home() {
                       className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
                       style={{ background: "rgba(168,85,247,0.12)", color: "#c084fc" }}>
                       Remix
+                    </button>
+                    <button onClick={() => handleDelete(selectedTrack)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                      style={{ background: "rgba(239,68,68,0.08)", color: "rgba(239,68,68,0.6)" }}>
+                      Delete
                     </button>
                   </div>
                 </div>

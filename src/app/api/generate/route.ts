@@ -49,50 +49,55 @@ export async function POST(req: NextRequest) {
 
     if (insertError) throw insertError;
 
-    // 2. Run Claude metadata + Replicate audio in parallel
-    const [metadata, audio] = await Promise.all([
-      generateMetadata({ prompt, genre: genre || undefined, mood: mood || undefined }),
-      generateMusic({ prompt, genre: genre || undefined, mood: mood || undefined, duration }),
-    ]);
+    try {
+      // 2. Run Claude metadata + Replicate audio in parallel
+      const [metadata, audio] = await Promise.all([
+        generateMetadata({ prompt, genre: genre || undefined, mood: mood || undefined }),
+        generateMusic({ prompt, genre: genre || undefined, mood: mood || undefined, duration }),
+      ]);
 
-    // 3. Download audio from Replicate and upload to Supabase Storage
-    const audioResponse = await fetch(audio.audioUrl);
-    const audioBuffer = await audioResponse.arrayBuffer();
-    const audioPath = `${user.id}/${track.id}.mp3`;
+      // 3. Download audio from Replicate and upload to Supabase Storage
+      const audioResponse = await fetch(audio.audioUrl);
+      const audioBuffer = await audioResponse.arrayBuffer();
+      const audioPath = `${user.id}/${track.id}.mp3`;
 
-    const { error: uploadError } = await supabase.storage
-      .from("tracks")
-      .upload(audioPath, audioBuffer, {
-        contentType: "audio/mpeg",
-        upsert: true,
-      });
+      const { error: uploadError } = await supabase.storage
+        .from("tracks")
+        .upload(audioPath, audioBuffer, {
+          contentType: "audio/mpeg",
+          upsert: true,
+        });
 
-    if (uploadError) throw uploadError;
+      if (uploadError) throw uploadError;
 
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from("tracks").getPublicUrl(audioPath);
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("tracks").getPublicUrl(audioPath);
 
-    // 4. Update track with metadata and audio URL
-    const { data: updatedTrack, error: updateError } = await supabase
-      .from("tracks")
-      .update({
-        title: metadata.title,
-        lyrics: metadata.lyrics,
-        description: metadata.description,
-        tags: metadata.tags,
-        audio_url: publicUrl,
-        duration_seconds: duration,
-        replicate_prediction_id: audio.predictionId,
-        status: "completed",
-      })
-      .eq("id", track.id)
-      .select()
-      .single();
+      // 4. Update track with metadata and audio URL
+      const { data: updatedTrack, error: updateError } = await supabase
+        .from("tracks")
+        .update({
+          title: metadata.title,
+          lyrics: metadata.lyrics,
+          description: metadata.description,
+          tags: metadata.tags,
+          audio_url: publicUrl,
+          duration_seconds: duration,
+          replicate_prediction_id: audio.predictionId,
+          status: "completed",
+        })
+        .eq("id", track.id)
+        .select()
+        .single();
 
-    if (updateError) throw updateError;
+      if (updateError) throw updateError;
 
-    return NextResponse.json({ track: updatedTrack });
+      return NextResponse.json({ track: updatedTrack });
+    } catch (genError: any) {
+      await supabase.from("tracks").update({ status: "failed" }).eq("id", track.id);
+      throw genError;
+    }
   } catch (error: any) {
     console.error("Generate error:", error);
     return NextResponse.json(
