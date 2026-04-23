@@ -44,7 +44,3 @@ export interface MetadataResponse {
   tags: string[];
 }
 
-export interface GenerateResponse {
-  trackId: string;
-  status: "generating";
-}

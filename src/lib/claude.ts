@@ -38,7 +38,11 @@ export async function generateMetadata(params: {
     .join("");
 
   const clean = text.replace(/```json|```/g, "").trim();
-  return JSON.parse(clean) as MetadataResponse;
+  try {
+    return JSON.parse(clean) as MetadataResponse;
+  } catch {
+    throw new Error(`Claude returned invalid JSON for metadata: ${clean.slice(0, 120)}`);
+  }
 }
 
 export async function generateRemixSuggestions(params: {
@@ -63,5 +67,10 @@ export async function generateRemixSuggestions(params: {
     .map((b) => (b as { type: "text"; text: string }).text)
     .join("");
 
-  return JSON.parse(text.replace(/```json|```/g, "").trim());
+  const clean = text.replace(/```json|```/g, "").trim();
+  try {
+    return JSON.parse(clean);
+  } catch {
+    throw new Error(`Claude returned invalid JSON for remix suggestions: ${clean.slice(0, 120)}`);
+  }
 }
