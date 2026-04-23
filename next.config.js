@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  serverExternalPackages: ["music-metadata"],
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "replicate.delivery" },
