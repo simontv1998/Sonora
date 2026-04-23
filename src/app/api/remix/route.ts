@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { generateRemix } from "@/lib/replicate";
 import { generateMetadata, generateRemixSuggestions } from "@/lib/claude";
+import { parseBuffer } from "music-metadata";
 
 export const maxDuration = 120;
 
@@ -116,6 +117,9 @@ export async function POST(req: NextRequest) {
         data: { publicUrl },
       } = supabase.storage.from("tracks").getPublicUrl(audioPath);
 
+      const mm = await parseBuffer(Buffer.from(audioBuffer), { mimeType: "audio/mpeg" });
+      const actualDuration = Math.round(mm.format.duration ?? duration);
+
       // Update remix track
       const { data: updatedTrack } = await supabase
         .from("tracks")
@@ -125,7 +129,7 @@ export async function POST(req: NextRequest) {
           description: metadata.description,
           tags: metadata.tags,
           audio_url: publicUrl,
-          duration_seconds: duration,
+          duration_seconds: actualDuration,
           replicate_prediction_id: audio.predictionId,
           status: "completed",
         })

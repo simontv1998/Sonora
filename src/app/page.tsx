@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase";
 import { usePlayerStore, useAppStore } from "@/lib/store";
 import type { Track, GenerateRequest } from "@/lib/types";
@@ -8,6 +8,7 @@ import type { Track, GenerateRequest } from "@/lib/types";
 // ─── Constants ───
 const GENRES = ["Pop", "Hip Hop", "Rock", "Electronic", "Jazz", "R&B", "Classical", "Lo-Fi", "Ambient", "Latin"];
 const MOODS = ["Energetic", "Chill", "Melancholic", "Uplifting", "Dark", "Dreamy", "Aggressive", "Romantic"];
+const PAGE_SIZE = 20;
 
 // ─── Helpers ───
 const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s) % 60).padStart(2, "0")}`;
@@ -119,7 +120,7 @@ function AudioPlayerBar() {
 
   if (!currentTrack) return null;
 
-  const fakeWaveform = currentTrack.waveform_data || seededWaveform(currentTrack.id);
+  const waveform = currentTrack.waveform_data || seededWaveform(currentTrack.id);
 
   return (
     <div className="fixed bottom-0 left-0 right-0 backdrop-blur-xl border-t z-50"
@@ -140,7 +141,7 @@ function AudioPlayerBar() {
               {formatTime((currentTrack.duration_seconds || 0) * progress)} / {formatTime(currentTrack.duration_seconds || 0)}
             </span>
           </div>
-          <Waveform data={fakeWaveform} progress={progress} height={28} onClick={(p) => {
+          <Waveform data={waveform} progress={progress} height={28} onClick={(p) => {
             if (audioRef.current && currentTrack.audio_url) {
               audioRef.current.currentTime = p * (audioRef.current.duration || 0);
             }
@@ -153,39 +154,90 @@ function AudioPlayerBar() {
 }
 
 // ─── Track Card ───
-function TrackCard({ track, onSelect, isSelected }: {
+function TrackCard({ track, onSelect, isSelected, genProgress }: {
   track: Track;
   onSelect: (t: Track) => void;
   isSelected: boolean;
+  genProgress?: number; // passed only for the active optimistic card
 }) {
   const { toggle, currentTrack, isPlaying, progress } = usePlayerStore();
   const playing = currentTrack?.id === track.id && isPlaying;
   const waveform = track.waveform_data || seededWaveform(track.id);
+  const isGenerating = track.status === "generating";
+  const isFailed = track.status === "failed";
 
   return (
     <div
       onClick={() => onSelect(track)}
       className="rounded-2xl p-4 cursor-pointer transition-all animate-fade-in"
       style={{
-        background: isSelected ? "rgba(168,85,247,0.06)" : "rgba(255,255,255,0.02)",
-        border: `1px solid ${isSelected ? "rgba(168,85,247,0.25)" : track.status === "failed" ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.05)"}`,
+        background: isSelected
+          ? "rgba(168,85,247,0.06)"
+          : isGenerating
+          ? "rgba(168,85,247,0.02)"
+          : "rgba(255,255,255,0.02)",
+        border: `1px solid ${
+          isSelected
+            ? "rgba(168,85,247,0.25)"
+            : isFailed
+            ? "rgba(239,68,68,0.2)"
+            : isGenerating
+            ? "rgba(168,85,247,0.2)"
+            : "rgba(255,255,255,0.05)"
+        }`,
       }}
     >
       <div className="flex justify-between items-start mb-3">
         <div className="flex-1 min-w-0">
-          <div className="font-mono font-semibold text-sm mb-1 truncate">{track.title}</div>
-          <div className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
-            {track.genre} · {track.mood} · {formatTime(track.duration_seconds || 0)}
-            {track.is_remix && " · Remix"}
+          <div
+            className="font-mono font-semibold text-sm mb-1 truncate"
+            style={{ color: isGenerating ? "#c084fc" : undefined }}
+          >
+            {track.title}
           </div>
+          {isGenerating ? (
+            <div className="text-xs animate-pulse" style={{ color: "#a855f7" }}>
+              Composing track...
+            </div>
+          ) : (
+            <div className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
+              {track.genre} · {track.mood} · {formatTime(track.duration_seconds || 0)}
+              {track.is_remix && " · Remix"}
+            </div>
+          )}
         </div>
-        <button onClick={(e) => { e.stopPropagation(); toggle(track); }}
+        <button
+          disabled={isGenerating}
+          onClick={(e) => { e.stopPropagation(); if (!isGenerating) toggle(track); }}
           className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 transition-colors text-sm"
-          style={{ background: playing ? "#a855f7" : "rgba(255,255,255,0.06)" }}>
-          {track.status === "failed" ? "✕" : track.status === "generating" ? "⟳" : playing ? "❚❚" : "▶"}
+          style={{
+            background: isGenerating
+              ? "rgba(168,85,247,0.1)"
+              : playing
+              ? "#a855f7"
+              : "rgba(255,255,255,0.06)",
+          }}
+        >
+          {isFailed ? "✕" : isGenerating ? "⟳" : playing ? "❚❚" : "▶"}
         </button>
       </div>
-      <Waveform data={waveform} progress={playing ? progress : 0} height={28} />
+
+      {isGenerating ? (
+        <div className="h-[28px] flex items-center">
+          <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${genProgress ?? 35}%`,
+                background: "linear-gradient(90deg, #a855f7, #06b6d4)",
+              }}
+            />
+          </div>
+        </div>
+      ) : (
+        <Waveform data={waveform} progress={playing ? progress : 0} height={28} />
+      )}
+
       <div className="mt-2 text-xs truncate" style={{ color: "rgba(255,255,255,0.2)" }}>
         &ldquo;{track.prompt}&rdquo;
       </div>
@@ -196,7 +248,7 @@ function TrackCard({ track, onSelect, isSelected }: {
 // ─── Main App ───
 export default function Home() {
   const supabase = createClient();
-  const { tracks, setTracks, addTrack, updateTrack, removeTrack } = useAppStore();
+  const { tracks, setTracks, addTrack, removeTrack } = useAppStore();
   const { toggle, currentTrack, isPlaying } = usePlayerStore();
 
   const [user, setUser] = useState<any>(null);
@@ -206,6 +258,8 @@ export default function Home() {
   const [mood, setMood] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [genProgress, setGenProgress] = useState(0);
+  const [optimisticTrackId, setOptimisticTrackId] = useState<string | null>(null);
+  const [libraryPage, setLibraryPage] = useState(1);
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [authMode, setAuthMode] = useState<"login" | "signup">("signup");
   const [email, setEmail] = useState("");
@@ -243,13 +297,13 @@ export default function Home() {
     if (error) setAuthError(error.message);
   };
 
-  // Generate track
-  const handleGenerate = async () => {
-    if (!prompt.trim() || generating) return;
-    setGenerating(true);
-    setGenProgress(0);
-    setGenError(null);
-
+  // Shared generate logic used by both handleGenerate and handleRetryTrack
+  const runGenerate = async (
+    reqPrompt: string,
+    reqGenre: string | null,
+    reqMood: string | null,
+    tempId: string,
+  ) => {
     const interval = setInterval(() => {
       setGenProgress((p) => Math.min(p + Math.random() * 6, 92));
     }, 500);
@@ -262,27 +316,113 @@ export default function Home() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session?.access_token}`,
         },
-        body: JSON.stringify({ prompt, genre, mood, duration: 15 } as GenerateRequest),
+        body: JSON.stringify({
+          prompt: reqPrompt,
+          genre: reqGenre,
+          mood: reqMood,
+          duration: 15,
+        } as GenerateRequest),
       });
 
       clearInterval(interval);
       setGenProgress(100);
 
       const data = await res.json();
+      removeTrack(tempId);
+      setOptimisticTrackId(null);
+
       if (data.track) {
         addTrack(data.track);
         setSelectedTrack(data.track);
-        setPrompt("");
-        setView("library");
+        return true;
+      } else {
+        setGenError(data.error || "Generation failed. Please try again.");
+        return false;
       }
     } catch (err: any) {
       console.error(err);
+      clearInterval(interval);
+      removeTrack(tempId);
+      setOptimisticTrackId(null);
       setGenError(err?.message || "Generation failed. Please try again.");
+      return false;
     } finally {
       clearInterval(interval);
       setGenerating(false);
       setGenProgress(0);
     }
+  };
+
+  // Generate a new track
+  const handleGenerate = async () => {
+    if (!prompt.trim() || generating) return;
+    setGenerating(true);
+    setGenProgress(0);
+    setGenError(null);
+
+    // Capture and clear form before the async work
+    const currentPrompt = prompt;
+    const currentGenre = genre;
+    const currentMood = mood;
+    setPrompt("");
+
+    // Add optimistic card and jump to Library immediately
+    const tempId = `optimistic-${Date.now()}`;
+    const optimisticTrack: Track = {
+      id: tempId,
+      user_id: user.id,
+      title: "Generating...",
+      prompt: currentPrompt,
+      genre: currentGenre,
+      mood: currentMood,
+      lyrics: null,
+      description: null,
+      tags: [],
+      duration_seconds: null,
+      audio_url: null,
+      waveform_data: null,
+      parent_track_id: null,
+      is_remix: false,
+      is_public: false,
+      share_slug: null,
+      play_count: 0,
+      status: "generating",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    addTrack(optimisticTrack);
+    setOptimisticTrackId(tempId);
+    setSelectedTrack(optimisticTrack);
+    setView("library");
+
+    const ok = await runGenerate(currentPrompt, currentGenre, currentMood, tempId);
+    if (!ok) setView("create");
+  };
+
+  // Retry a failed track in-place
+  const handleRetryTrack = async (track: Track) => {
+    if (generating) return;
+    setGenerating(true);
+    setGenProgress(0);
+    setGenError(null);
+
+    // Swap failed card for an optimistic one
+    const tempId = `optimistic-${Date.now()}`;
+    const optimisticTrack: Track = {
+      ...track,
+      id: tempId,
+      title: "Generating...",
+      status: "generating",
+      audio_url: null,
+      updated_at: new Date().toISOString(),
+    };
+    removeTrack(track.id);
+    supabase.from("tracks").delete().eq("id", track.id); // fire-and-forget
+    addTrack(optimisticTrack);
+    setOptimisticTrackId(tempId);
+    setSelectedTrack(optimisticTrack);
+
+    await runGenerate(track.prompt, track.genre, track.mood, tempId);
   };
 
   // Share track
@@ -319,6 +459,10 @@ export default function Home() {
     const data = await res.json();
     if (data.suggestions) setRemixSuggestions(data.suggestions);
   };
+
+  // Pagination
+  const visibleTracks = tracks.slice(0, libraryPage * PAGE_SIZE);
+  const hasMore = tracks.length > visibleTracks.length;
 
   // ─── Auth Screen ───
   if (!user) {
@@ -437,26 +581,9 @@ export default function Home() {
             </div>
 
             {genError && (
-              <div className="rounded-xl px-4 py-3 text-sm mb-4 animate-fade-in"
+              <div className="rounded-xl px-4 py-3 text-sm animate-fade-in"
                 style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.18)", color: "#f87171" }}>
                 {genError}
-              </div>
-            )}
-
-            {generating && (
-              <div className="rounded-2xl p-6 animate-fade-in"
-                style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(168,85,247,0.12)" }}>
-                <div className="flex justify-between mb-3">
-                  <span className="text-sm font-medium" style={{ color: "#c084fc" }}>Composing your track...</span>
-                  <span className="text-sm font-mono" style={{ color: "rgba(255,255,255,0.25)" }}>{Math.round(genProgress)}%</span>
-                </div>
-                <div className="h-1 rounded-full overflow-hidden mb-4" style={{ background: "rgba(255,255,255,0.05)" }}>
-                  <div className="h-full rounded-full transition-all duration-500"
-                    style={{ width: `${genProgress}%`, background: "linear-gradient(90deg, #a855f7, #06b6d4)" }} />
-                </div>
-                <p className="text-center text-xs" style={{ color: "rgba(255,255,255,0.2)" }}>
-                  {genProgress < 30 ? "Analyzing prompt..." : genProgress < 60 ? "Composing melody..." : genProgress < 85 ? "Arranging instruments..." : "Finalizing mix..."}
-                </p>
               </div>
             )}
           </div>
@@ -476,19 +603,40 @@ export default function Home() {
                 <p>No tracks yet. Create your first one!</p>
               </div>
             ) : (
-              <div className="flex flex-col gap-3">
-                {tracks.map((t) => (
-                  <TrackCard key={t.id} track={t} onSelect={(tr) => {
-                    setSelectedTrack(tr);
-                    setRemixSuggestions([]);
-                    setShareUrl(null);
-                  }} isSelected={selectedTrack?.id === t.id} />
-                ))}
-              </div>
+              <>
+                <div className="flex flex-col gap-3">
+                  {visibleTracks.map((t) => (
+                    <TrackCard
+                      key={t.id}
+                      track={t}
+                      onSelect={(tr) => {
+                        setSelectedTrack(tr);
+                        setRemixSuggestions([]);
+                        setShareUrl(null);
+                      }}
+                      isSelected={selectedTrack?.id === t.id}
+                      genProgress={t.id === optimisticTrackId ? genProgress : undefined}
+                    />
+                  ))}
+                </div>
+                {hasMore && (
+                  <button
+                    onClick={() => setLibraryPage((p) => p + 1)}
+                    className="w-full mt-4 py-2.5 rounded-xl text-sm transition-all"
+                    style={{
+                      background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.07)",
+                      color: "rgba(255,255,255,0.3)",
+                    }}
+                  >
+                    Load more · {tracks.length - visibleTracks.length} remaining
+                  </button>
+                )}
+              </>
             )}
 
-            {/* Detail Panel */}
-            {selectedTrack && (
+            {/* Detail Panel — hidden while the track is still generating */}
+            {selectedTrack && selectedTrack.status !== "generating" && (
               <div className="mt-7 rounded-2xl p-6 animate-fade-in"
                 style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)" }}>
                 <div className="flex justify-between items-start mb-4">
@@ -498,17 +646,29 @@ export default function Home() {
                       {selectedTrack.genre} · {selectedTrack.mood} · {formatTime(selectedTrack.duration_seconds || 0)}
                     </p>
                   </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => handleShare(selectedTrack)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
-                      style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)" }}>
-                      Share
-                    </button>
-                    <button onClick={() => loadRemixSuggestions(selectedTrack)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
-                      style={{ background: "rgba(168,85,247,0.12)", color: "#c084fc" }}>
-                      Remix
-                    </button>
+                  <div className="flex gap-2 flex-wrap justify-end">
+                    {selectedTrack.status === "failed" ? (
+                      <button
+                        onClick={() => handleRetryTrack(selectedTrack)}
+                        disabled={generating}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                        style={{ background: "rgba(168,85,247,0.12)", color: "#c084fc" }}>
+                        Retry
+                      </button>
+                    ) : (
+                      <>
+                        <button onClick={() => handleShare(selectedTrack)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                          style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)" }}>
+                          Share
+                        </button>
+                        <button onClick={() => loadRemixSuggestions(selectedTrack)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                          style={{ background: "rgba(168,85,247,0.12)", color: "#c084fc" }}>
+                          Remix
+                        </button>
+                      </>
+                    )}
                     <button onClick={() => handleDelete(selectedTrack)}
                       className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
                       style={{ background: "rgba(239,68,68,0.08)", color: "rgba(239,68,68,0.6)" }}>
@@ -522,6 +682,12 @@ export default function Home() {
                     style={{ background: "rgba(6,182,212,0.08)", border: "1px solid rgba(6,182,212,0.2)", color: "#06b6d4" }}>
                     Link copied! {shareUrl}
                   </div>
+                )}
+
+                {selectedTrack.status === "failed" && (
+                  <p className="text-sm mb-4" style={{ color: "rgba(239,68,68,0.6)" }}>
+                    Generation failed. Click Retry to try again with the same prompt.
+                  </p>
                 )}
 
                 {selectedTrack.description && (
@@ -550,7 +716,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Remix suggestions */}
                 {remixSuggestions.length > 0 && (
                   <div className="mt-5">
                     <label className="block text-[11px] font-semibold uppercase tracking-widest mb-3"

@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase";
 import { generateMusic } from "@/lib/replicate";
 import { generateMetadata } from "@/lib/claude";
 import type { GenerateRequest } from "@/lib/types";
+import { parseBuffer } from "music-metadata";
 
 export const maxDuration = 120; // Allow up to 2 min for audio generation
 
@@ -74,6 +75,10 @@ export async function POST(req: NextRequest) {
         data: { publicUrl },
       } = supabase.storage.from("tracks").getPublicUrl(audioPath);
 
+      // Extract actual duration from the audio file
+      const mm = await parseBuffer(Buffer.from(audioBuffer), { mimeType: "audio/mpeg" });
+      const actualDuration = Math.round(mm.format.duration ?? duration);
+
       // 4. Update track with metadata and audio URL
       const { data: updatedTrack, error: updateError } = await supabase
         .from("tracks")
@@ -83,7 +88,7 @@ export async function POST(req: NextRequest) {
           description: metadata.description,
           tags: metadata.tags,
           audio_url: publicUrl,
-          duration_seconds: duration,
+          duration_seconds: actualDuration,
           replicate_prediction_id: audio.predictionId,
           status: "completed",
         })
