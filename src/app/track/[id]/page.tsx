@@ -33,11 +33,12 @@ export default function SharedTrackPage({ params }: { params: { id: string } }) 
     const update = () => {
       if (audio.duration) setProgress(audio.currentTime / audio.duration);
     };
+    const onEnded = () => setIsPlaying(false);
     audio.addEventListener("timeupdate", update);
-    audio.addEventListener("ended", () => setIsPlaying(false));
+    audio.addEventListener("ended", onEnded);
     return () => {
       audio.removeEventListener("timeupdate", update);
-      audio.removeEventListener("ended", () => setIsPlaying(false));
+      audio.removeEventListener("ended", onEnded);
     };
   }, [track]);
 
@@ -45,10 +46,11 @@ export default function SharedTrackPage({ params }: { params: { id: string } }) 
     if (!audioRef.current) return;
     if (isPlaying) {
       audioRef.current.pause();
+      setIsPlaying(false);
     } else {
-      audioRef.current.play();
+      audioRef.current.play().catch(() => setIsPlaying(false));
+      setIsPlaying(true);
     }
-    setIsPlaying(!isPlaying);
   };
 
   if (loading) {

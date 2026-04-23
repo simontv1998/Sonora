@@ -249,7 +249,6 @@ function TrackCard({ track, onSelect, isSelected, genProgress }: {
 export default function Home() {
   const supabase = createClient();
   const { tracks, setTracks, addTrack, removeTrack } = useAppStore();
-  const { toggle, currentTrack, isPlaying } = usePlayerStore();
 
   const [user, setUser] = useState<any>(null);
   const [view, setView] = useState<"create" | "library">("create");
@@ -265,6 +264,8 @@ export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [tracksLoading, setTracksLoading] = useState(false);
   const [remixSuggestions, setRemixSuggestions] = useState<string[]>([]);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [genError, setGenError] = useState<string | null>(null);
@@ -281,20 +282,30 @@ export default function Home() {
   // Load tracks
   useEffect(() => {
     if (!user) return;
+    setTracksLoading(true);
     supabase
       .from("tracks")
       .select("*")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
-      .then(({ data }) => { if (data) setTracks(data as Track[]); });
+      .then(({ data }) => {
+        if (data) setTracks(data as Track[]);
+        setTracksLoading(false);
+      });
   }, [user]);
 
   // Auth handler
   const handleAuth = async () => {
+    if (authLoading) return;
     setAuthError("");
-    const fn = authMode === "signup" ? supabase.auth.signUp : supabase.auth.signInWithPassword;
-    const { error } = await fn.call(supabase.auth, { email, password });
-    if (error) setAuthError(error.message);
+    setAuthLoading(true);
+    try {
+      const fn = authMode === "signup" ? supabase.auth.signUp : supabase.auth.signInWithPassword;
+      const { error } = await fn.call(supabase.auth, { email, password });
+      if (error) setAuthError(error.message);
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   // Shared generate logic used by both handleGenerate and handleRetryTrack
@@ -474,10 +485,14 @@ export default function Home() {
               style={{ background: "linear-gradient(135deg, #a855f7, #06b6d4)" }}>♪</div>
             <span className="font-mono font-bold text-2xl tracking-tight">SONORA</span>
           </div>
-          <div className="rounded-2xl p-6" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <form
+            onSubmit={(e) => { e.preventDefault(); handleAuth(); }}
+            className="rounded-2xl p-6"
+            style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
+          >
             <div className="flex gap-1 mb-6 p-1 rounded-xl" style={{ background: "rgba(255,255,255,0.04)" }}>
               {(["signup", "login"] as const).map((m) => (
-                <button key={m} onClick={() => setAuthMode(m)}
+                <button key={m} type="button" onClick={() => setAuthMode(m)}
                   className="flex-1 py-2 rounded-lg text-sm font-medium transition-all capitalize"
                   style={{
                     background: authMode === m ? "rgba(168,85,247,0.15)" : "transparent",
@@ -488,18 +503,24 @@ export default function Home() {
               ))}
             </div>
             <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email"
+              type="email" autoComplete="email" disabled={authLoading}
               className="w-full mb-3 px-4 py-3 rounded-xl text-sm outline-none"
               style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#f0f0f0" }} />
             <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" type="password"
+              autoComplete={authMode === "signup" ? "new-password" : "current-password"} disabled={authLoading}
               className="w-full mb-4 px-4 py-3 rounded-xl text-sm outline-none"
               style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#f0f0f0" }} />
             {authError && <p className="text-red-400 text-xs mb-3">{authError}</p>}
-            <button onClick={handleAuth}
+            <button type="submit" disabled={authLoading}
               className="w-full py-3 rounded-xl font-semibold text-sm transition-all"
-              style={{ background: "linear-gradient(135deg, #a855f7, #7c3aed)", color: "#fff" }}>
-              {authMode === "signup" ? "Create Account" : "Log In"}
+              style={{
+                background: authLoading ? "rgba(168,85,247,0.4)" : "linear-gradient(135deg, #a855f7, #7c3aed)",
+                color: "#fff",
+                cursor: authLoading ? "not-allowed" : "pointer",
+              }}>
+              {authLoading ? "..." : authMode === "signup" ? "Create Account" : "Log In"}
             </button>
-          </div>
+          </form>
         </div>
       </div>
     );
@@ -597,7 +618,14 @@ export default function Home() {
               <span className="text-sm" style={{ color: "rgba(255,255,255,0.2)" }}>{tracks.length} tracks</span>
             </div>
 
-            {tracks.length === 0 ? (
+            {tracksLoading ? (
+              <div className="flex flex-col gap-3">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="rounded-2xl p-4 animate-pulse"
+                    style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", height: 96 }} />
+                ))}
+              </div>
+            ) : tracks.length === 0 ? (
               <div className="text-center py-16" style={{ color: "rgba(255,255,255,0.15)" }}>
                 <div className="text-4xl mb-3">♪</div>
                 <p>No tracks yet. Create your first one!</p>

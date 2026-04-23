@@ -44,9 +44,11 @@ export async function generateMusic(params: {
     input,
   });
 
-  // Wait for completion (poll)
+  // Poll until terminal state, bail after 60 attempts (~2 min)
   let result = prediction;
+  let attempts = 0;
   while (result.status !== "succeeded" && result.status !== "failed") {
+    if (++attempts > 60) throw new Error("MusicGen timed out after 2 minutes");
     await new Promise((r) => setTimeout(r, 2000));
     result = await replicate.predictions.get(result.id);
   }
@@ -59,7 +61,9 @@ export async function generateMusic(params: {
     ? result.output
     : Array.isArray(result.output)
       ? result.output[0]
-      : "";
+      : null;
+
+  if (!audioUrl) throw new Error("MusicGen returned no audio URL");
 
   return { audioUrl, predictionId: result.id };
 }
